@@ -1,3 +1,7 @@
+logs/
+tmp/
+U2Net/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
