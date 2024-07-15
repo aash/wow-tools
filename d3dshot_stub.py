@@ -14,7 +14,7 @@ class CaptureOutputs:
     NUMPY = 1
 
 class D3DShot:
-    FULL_SCREEN = (0, 0, 1980*2, 1080*2)
+    FULL_SCREEN = (0, 0, 1920*2, 1080*2)
 
     # capture_output is here for compatibility with original D3DShot implementation
     def __init__(self, capture_output = CaptureOutputs.NUMPY, fps = 30, roi: Rect = Rect(*FULL_SCREEN)):
