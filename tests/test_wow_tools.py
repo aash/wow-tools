@@ -140,8 +140,9 @@ def highlight_segments(image, min_length, angle_threshold):
     
     return image
 
-def monitor_bobber(im, fishing_line_color):
-    fl = cv.inRange(im, fishing_line_color, fishing_line_color)
+def monitor_bobber(im, fishing_line_color, deviation=np.array((10,10,10))):
+    fl = cv.inRange(im, fishing_line_color - deviation, fishing_line_color + deviation)
+    fl = remove_small_connected_components(fl)
     non_black_coords = np.argwhere(fl > 0)
     if len(non_black_coords) > 5:
         center = np.array(fl.shape) // 2
@@ -164,6 +165,7 @@ def test_get_tooltip1():
          hotkey_handler('^2', 'fish') as start_fishing, \
          timeout(3000) as is_not_timeout:
         fishing_line_color = np.array((122,  90, 58))
+        bobber_seg_errors = 0
         # fishing_line_color1 = np.array((126,  88,  48))
         state = 'idle'
         ii = 0
@@ -181,25 +183,28 @@ def test_get_tooltip1():
                 w = w // 3
                 img = crop_image(im, Rect(w, 0, w, h))
                 mask = np.zeros((h, w), dtype=np.uint8)
-                cv.rectangle(mask, Rect(w//3, 0, w//3, h).xywh(), (255), -1) 
-                seg, m = run_grabcut(img, mask)
-                pixels = seg.reshape(-1, 3)
-                unique_colors_set = set([tuple(pixel.astype(int)) for pixel in pixels])
-                unique_colors = sorted(unique_colors_set)
-                unique_colors.remove((0,0,0))
-                unique_colors = list(unique_colors)
+                cv.rectangle(mask, Rect(w//3, 0, w//3, h).xywh(), (255), -1)
+                try:
+                    seg, m = run_grabcut(img, mask)
+                except Exception as e:
+                    logging.info(e)
+                    seg = None
+                # pixels = seg.reshape(-1, 3)
+                # unique_colors_set = set([tuple(pixel.astype(int)) for pixel in pixels])
+                # unique_colors = sorted(unique_colors_set)
+                # unique_colors.remove((0,0,0))
+                # unique_colors = list(unique_colors)
                 # ovl_show_img(seg)
                 # time.sleep(1)
-                if len(unique_colors) != 1:
-                    logging.info('calibration unsuccessful: could not properly segment fishing line')
-                else:
-                    fishing_line_color = np.array(unique_colors[0])
+                if seg is not None:
+                    fishing_line_color = calculate_average_color(seg)
+                    # TODO add check for correctness. fishing_line_color pixels should
+                    # form a line
                     ovl_show_img(hstack([img, seg]))
                     time.sleep(1)
                     # cv.imwrite(f'tmp/fishline{i}.png', seg)
                     # cv.imwrite(f'tmp/frame{i}.png', im)
-                logging.info(fishing_line_color)
-                # logging.info(fishing_line_color1)
+                    logging.info(fishing_line_color)
             
             if start_fishing() == 'fish':
                 if state == 'fishing':
@@ -222,6 +227,7 @@ def test_get_tooltip1():
                         time.sleep(0.01)
                     if not bobber_found:
                         state = 'idle'
+                    bobber_seg_errors = 0
                     
 
             if state == 'monitor-bobber':
@@ -232,17 +238,23 @@ def test_get_tooltip1():
                     bobber_img = crop_image(im, Rect(*(bxy - ofs), *bobber_wh))
                     bobber_msk = np.zeros(bobber_wh, dtype=np.uint8)
                     cv.rectangle(bobber_msk, bobber_wh // 4, 3 * bobber_wh // 4, (255), -1)
-                    bobber_segmented, qwe = run_grabcut(bobber_img, bobber_msk)
-                    if is_bobber_drown(bobber_segmented):
-                        time.sleep(0.3)
-                        s.ahk.mouse_move(x=bxy[0], y=bxy[1])
-                        time.sleep(0.5)
-                        s.ahk.right_click()
-                        cv.rectangle(out_img, Rect(*(bxy - ofs), *bobber_wh).xywh(), (0, 255, 0), 2)
-                        ovl_show_img(out_img)
-                        time.sleep(1)
+                    try:
+                        bobber_segmented, qwe = run_grabcut(bobber_img, bobber_msk)
+                    except Exception as e:
+                        bobber_seg_errors += 1
+                    if bobber_seg_errors > 4:
                         state = 'fishing'
-                    # cv.imwrite(f'tmp/bobber/{ii:04d}.bmp', hstack((bobber_img, bobber_segmented)))
+                    else:
+                        if is_bobber_drown(bobber_segmented):
+                            time.sleep(0.3)
+                            s.ahk.mouse_move(x=bxy[0], y=bxy[1])
+                            time.sleep(0.5)
+                            s.ahk.right_click()
+                            cv.rectangle(out_img, Rect(*(bxy - ofs), *bobber_wh).xywh(), (0, 255, 0), 2)
+                            out_img = cv.resize(out_img, None, fx=0.5, fy=0.5)
+                            ovl_show_img(out_img)
+                            time.sleep(1)
+                            state = 'fishing'
                     ii += 1
 
                 if not bobber_found:
@@ -250,7 +262,19 @@ def test_get_tooltip1():
                     cv.imwrite(f'tmp/bobber_not_found{i:0d}_.bmp', out_img)
                     logging.info(f'state is {state}')
                     state = 'idle'
-            
+            out_img = cv.resize(out_img, None, fx=0.5, fy=0.5)
             ovl_show_img(out_img)
             i += 1
             time.sleep(0.010)
+
+
+def test_overlay_111():
+    with overlay_client() as ovl_clt:
+        im = cv.imread('tmp/pole.png')
+        ovl_clt(im)
+        time.sleep(3)
+
+
+
+
+

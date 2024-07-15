@@ -96,3 +96,28 @@ def is_bobber_drown(segmented_bobber_img):
     sp = itertools.product([-1, 0, 1], [-1, 0, 1])
     center_pixels_9 = [msk[*(bobber_wh // 2 + ofs)] for ofs in sp]
     return not np.any(center_pixels_9)
+
+def calculate_average_color(image):
+    image = image.astype(np.float32)
+    non_black_pixels_mask = np.any(image != [0, 0, 0], axis=-1)
+    non_black_pixels = image[non_black_pixels_mask]
+    if non_black_pixels.size == 0:
+        return (0, 0, 0)  # If no non-black pixels, return black
+    average_color = non_black_pixels.mean(axis=0)
+    average_color = tuple(average_color.astype(int))
+    return (average_color[0], average_color[1], average_color[2])  # Return as BGR tuple
+
+def remove_small_connected_components(image, min_size=100):
+    if len(image.shape) == 3:
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    else:
+        gray = image
+    _, binary = cv2.threshold(gray, 1, 255, cv2.THRESH_BINARY)
+    num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(binary, connectivity=8)
+    output_image = np.zeros_like(image)
+    for i in range(1, num_labels):
+        area = stats[i, cv2.CC_STAT_AREA]
+        if area >= min_size:
+            output_image[labels == i] = image[labels == i]
+
+    return output_image
