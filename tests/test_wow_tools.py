@@ -164,6 +164,7 @@ def test_get_tooltip1():
          hotkey_handler('^1', 'calibrate') as cmd_calib, \
          hotkey_handler('^2', 'fish') as start_fishing, \
          timeout(3000) as is_not_timeout:
+        # qweqwe
         fishing_line_color = np.array((122,  90, 58))
         bobber_seg_errors = 0
         # fishing_line_color1 = np.array((126,  88,  48))
