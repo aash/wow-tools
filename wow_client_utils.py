@@ -113,7 +113,7 @@ def remove_small_connected_components(image, min_size=100):
     else:
         gray = image
     _, binary = cv2.threshold(gray, 1, 255, cv2.THRESH_BINARY)
-    num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(binary, connectivity=8)
+    num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(binary, connectivity=4)
     output_image = np.zeros_like(image)
     for i in range(1, num_labels):
         area = stats[i, cv2.CC_STAT_AREA]

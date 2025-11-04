@@ -160,7 +160,9 @@ def monitor_bobber(im, fishing_line_color, deviation=np.array((10,10,10))):
 
 def test_get_tooltip1():
     i = 0
-    with overlay_client() as ovl_show_img, Snail() as s, hotkey_handler('^q', 'exit') as cmd_exit, \
+    with overlay_client() as ovl_show_img, \
+         Snail() as s, \
+         hotkey_handler('^q', 'exit') as cmd_exit, \
          hotkey_handler('^1', 'calibrate') as cmd_calib, \
          hotkey_handler('^2', 'fish') as start_fishing, \
          timeout(3000) as is_not_timeout:
@@ -270,11 +272,27 @@ def test_get_tooltip1():
 
 def test_overlay_111():
     with overlay_client() as ovl_clt:
-        im = cv.imread('tmp/pole.png')
-        ovl_clt(im)
-        time.sleep(3)
+        # im = cv.imread('tmp/pole.png')
+        # ovl_clt(im)
+        time.sleep(10)
 
 
+def test_get_scr():
+    with overlay_client() as ovl_show_img, \
+         Snail() as s, \
+         hotkey_handler('^q', 'exit') as cmd_exit, \
+         hotkey_handler('^1', 'calibrate') as cmd_calib, \
+         hotkey_handler('^2', 'fish') as start_fishing, \
+         timeout(3000) as is_not_timeout:
+        while is_not_timeout():
 
+            if cmd_exit() == 'exit':
+                logging.info('exiting')
+                break
 
+            if cmd_calib() == 'calibrate':
+                im = s.wait_next_frame()
+                cv.imwrite('out.png', im)
+
+            time.sleep(0.015)
 
