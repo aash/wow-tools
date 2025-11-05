@@ -155,8 +155,15 @@ def monitor_bobber(im, fishing_line_color, deviation=np.array((10,10,10))):
         fr = im.copy()
         cv.circle(fr, xy, 3, (255, 0,0), 1)
         cv.rectangle(fr, xy - ofs, xy + ofs, (0, 255,0), 1 )
-        return fr, True, xy
-    return im, False, None
+        return fr, True, xy, fl
+    return im, False, None, fl
+
+async def test_fishing():
+    async with overlay_client() as ovl_show_img, Snail() as s, hotkey_handler('^q', 'exit') as cmd_exit, \
+         hotkey_handler('^1', 'calibrate') as cmd_calib, \
+         hotkey_handler('^2', 'fish') as start_fishing, \
+         timeout(3000) as is_not_timeout:
+        pass
 
 def test_get_tooltip1():
     i = 0
@@ -165,7 +172,8 @@ def test_get_tooltip1():
          hotkey_handler('^2', 'fish') as start_fishing, \
          timeout(3000) as is_not_timeout:
         # qweqwe
-        fishing_line_color = np.array((122,  90, 58))
+
+        fishing_line_color = np.array((140, 100, 48))
         bobber_seg_errors = 0
         # fishing_line_color1 = np.array((126,  88,  48))
         state = 'idle'
@@ -208,31 +216,39 @@ def test_get_tooltip1():
                     logging.info(fishing_line_color)
             
             if start_fishing() == 'fish':
-                if state == 'fishing':
-                    state = 'idle'
-                else:
                     state = 'fishing'
+                # if state == 'fishing':
+                #     state = 'idle'
+                # else:
+                #     state = 'fishing'
             
             if state == 'fishing':
                 s.ahk.send('c')
                 ll = 0
                 time.sleep(3)
                 logging.info(f'state is {state}')
-                state = 'monitor-bobber'
-                with timeout(2) as is_bobber_not_timeout:
+                # state = 'monitor-bobber'
+                with timeout(20) as is_bobber_not_timeout:
                     while is_bobber_not_timeout():
                         im = s.wait_next_frame()
-                        out_img, bobber_found, bxy = monitor_bobber(im, fishing_line_color)
-                        if bobber_found:
-                            break
+                        out_img, bobber_found, bxy, r = monitor_bobber(im, fishing_line_color)
+
+                        # if bobber_found:
+                            # break
+                        out_img = hstack([out_img, r])
+                        out_img = cv.resize(out_img, None, fx=0.5, fy=0.5)
+                        ovl_show_img(out_img)
+                        i += 1
+                        # time.sleep(0.010)
                         time.sleep(0.01)
-                    if not bobber_found:
-                        state = 'idle'
-                    bobber_seg_errors = 0
+                    # if not bobber_found:
+                        # state = 'idle'
+                    # bobber_seg_errors = 0
                     
 
             if state == 'monitor-bobber':
                 out_img, bobber_found, bxy = monitor_bobber(im, fishing_line_color)
+                bobber_found = False
                 if bobber_found:
                     bobber_wh = np.array([80, 80])
                     ofs = bobber_wh // 2
@@ -263,6 +279,8 @@ def test_get_tooltip1():
                     cv.imwrite(f'tmp/bobber_not_found{i:0d}_.bmp', out_img)
                     logging.info(f'state is {state}')
                     state = 'idle'
+                    
+            
             out_img = cv.resize(out_img, None, fx=0.5, fy=0.5)
             ovl_show_img(out_img)
             i += 1

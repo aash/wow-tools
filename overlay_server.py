@@ -127,11 +127,11 @@ class MainWindow(QMainWindow):
                             #| Qt.WindowType.Tool
                             )
         self.setAttribute(Qt.WA_TranslucentBackground)
-        self.setGeometry(0, 0, 1920, 1200)
+        self.setGeometry(0, 0, 1920*2, 1080*2)
 
         self.w = QWidget(self)
         #self.w.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        self.w.setFixedSize(1920, 1200)
+        self.w.setFixedSize(1920*2, 1080*2)
         l = QGridLayout()
         l.setContentsMargins(0, 0, 0, 0)
         self.w.setLayout(l)
