@@ -441,3 +441,11 @@ def get_closest(mvl, v):
     dist = map(lambda x: tuple([x[0], abs(x[1] - v)]), enumerate(mvl))
     closest = min(dist, key=lambda x: x[1])
     return closest[0]
+
+from PIL import Image as PILImage
+from IPython.display import display
+
+def dis(*imgs):
+
+    l = list(map(PILImage.fromarray, imgs))
+    display(*l)

@@ -9,6 +9,12 @@ from asyncio.exceptions import IncompleteReadError
 import multiprocessing as mp
 import multiprocessing.shared_memory as shm
 import sys
+import logging
+
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO
+)
+logger = logging.getLogger('overlay_server')
 
 OVERLAY_IMAGE_BUFFER = 'overlay_image_buffer'
 
@@ -31,17 +37,17 @@ class ClientHandler:
                 cmd = await reader.readexactly(4)
                 t = struct.unpack('I', cmd)
                 if t[0] == Commands.SAVE.value:
-                    print('Received save command')
+                    logger.info('Received save command')
                     fmt = 'iiiI'
                     sz = struct.calcsize(fmt)
                     data = await reader.readexactly(sz)
                     t = struct.unpack(fmt, data)
-                    print(f'Received data: {t}')
+                    logger.info(f'Received data: {t}')
                     imsz = t[0] * t[1] * t[2]
-                    print(f'img size: {imsz} bytes')
+                    logger.info(f'img size: {imsz} bytes')
                     nme_data = await reader.readexactly(t[3])
                     name = nme_data.decode('utf-8')
-                    print(f'img name: {name}')
+                    logger.info(f'img name: {name}')
                     shma = shm.SharedMemory(name=OVERLAY_IMAGE_BUFFER)
                     im_shm = np.ndarray(t[:3], dtype=np.uint8, buffer=shma.buf)
                     im = cv.cvtColor(im_shm, cv.COLOR_BGR2RGB)
@@ -57,15 +63,15 @@ class ClientHandler:
                     await writer.drain()
                 elif t[0] == Commands.STOP.value:
                     self.sev.set()
-                    print('Received stop command')
+                    logger.info('Received stop command')
                     writer.write(struct.pack('I', Commands.OK.value))
                     await writer.drain()
                 else:
-                    print(f'Received unknown command: {t[0]}')
+                    logger.info(f'Received unknown command: {t[0]}')
             except IncompleteReadError as e:
                 asyncio.sleep(0.03)
 
-        print('Closing the connection')
+        logger.info('Closing the connection')
         writer.close()
 
 
@@ -191,6 +197,8 @@ class MainWindow(QMainWindow):
             await asyncio.sleep(0.01)
 
 async def main():
+    
+    overlay_server_address = '127.0.0.1:5123'
     app = QApplication(sys.argv)
     loop = QEventLoop(app)
     asyncio.set_event_loop(loop)
@@ -200,10 +208,10 @@ async def main():
     window = await MainWindow.create(loop, stop_event)
     window.setWindowTitle('aions')
     window.show()
-    print('window created')
+    logger.info('overlay window created')
 
     try:
-        host, port = '127.0.0.1:5123'.split(':')
+        host, port = overlay_server_address.split(':')
         port = int(port)
         server = await loop.create_server(lambda: asyncio.StreamReaderProtocol(asyncio.StreamReader(),
             ClientHandler(stop_event, window), loop=loop), host, port)

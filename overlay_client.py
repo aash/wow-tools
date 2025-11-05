@@ -15,13 +15,19 @@ MAX_IMG_SZ = 1024 * 1024 * 10
 SERVER_ADDRESS = '127.0.0.1:5123'
 SHMEM_NAME = 'overlay_image_buffer'
 
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO
+)
+logger = logging.getLogger('overlay_client')
+
+
 class Commands(Enum):
     SAVE = 0xDEADBEEF
     STOP = 0xFEADBABE
     OK = 0xCAFFEECA
 
 async def send_img(reader: StreamReader, writer: StreamWriter, im: np.ndarray, nme: str):
-    print(f'command: 0x{Commands.SAVE.value:X}, {im.shape}, size: {im.size}')
+    logger.info(f'command: 0x{Commands.SAVE.value:X}, {im.shape}, size: {im.size}')
     fmt = 'Iiii'
     sz = struct.calcsize(fmt)
     assert len(im.shape) == 3
@@ -56,7 +62,7 @@ async def overlay_client_async(command_queue: queue.Queue):
     # TODO: wait till server is ready
 
     t0 = loop.time()
-    logging.info('overlay async client: process started')
+    logger.info('overlay async client: process started')
     while True:
         call, data = command_queue.get()
         if call == 'exit':
@@ -69,11 +75,11 @@ async def overlay_client_async(command_queue: queue.Queue):
             await send_img(reader, writer, data[0], f"")
         await asyncio.sleep(0.005)
     await send_stop(reader, writer)
-    logging.info('overlay async client: closing the connection')
+    logger.info('overlay async client: closing the connection')
     writer.close()
     await writer.wait_closed()
     await proc.wait()
-    logging.info('overlay async client: process terminated')
+    logger.info('overlay async client: process terminated')
 
 @contextlib.contextmanager
 def overlay_client():
