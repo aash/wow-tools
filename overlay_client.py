@@ -1,14 +1,19 @@
 import logging
-import asyncio
-import sys
-import numpy as np
-import cv2 as cv
-from common import *
+from numpy import (
+    ndarray as np_ndarray,
+    uint8 as np_uint8,
+    copyto as np_copyto)
+# import numpy as np
+# import cv2 as cv
 import multiprocessing.shared_memory as shm
 from asyncio.streams import StreamWriter, StreamReader
+from asyncio import open_connection, sleep, run
+from asyncio.subprocess import create_subprocess_exec
 import struct
 import threading
 import queue
+import contextlib
+import enum
 
 SERVER_MODULE_NAME = 'overlay_server'
 MAX_IMG_SZ = 1024 * 1024 * 10
@@ -21,15 +26,14 @@ logging.basicConfig(
 logger = logging.getLogger('overlay_client')
 
 
-class Commands(Enum):
+class Commands(enum.Enum):
     SAVE = 0xDEADBEEF
     STOP = 0xFEADBABE
     OK = 0xCAFFEECA
 
-async def send_img(reader: StreamReader, writer: StreamWriter, im: np.ndarray, nme: str):
+async def send_img(reader: StreamReader, writer: StreamWriter, im: np_ndarray, nme: str):
     logger.info(f'command: 0x{Commands.SAVE.value:X}, {im.shape}, size: {im.size}')
     fmt = 'Iiii'
-    sz = struct.calcsize(fmt)
     assert len(im.shape) == 3
     data = struct.pack(fmt, Commands.SAVE.value, *im.shape)
     str_enc = nme.encode('utf-8')
@@ -51,30 +55,29 @@ async def send_stop(reader: StreamReader, writer: StreamWriter):
 
 
 async def overlay_client_async(command_queue: queue.Queue):
-    proc = await asyncio.subprocess.create_subprocess_exec('python.exe', f'{SERVER_MODULE_NAME}.py')
+    proc = await create_subprocess_exec('python.exe', f'{SERVER_MODULE_NAME}.py')
     shma = shm.SharedMemory(name=SHMEM_NAME, create=True, size=MAX_IMG_SZ)
     host, port = SERVER_ADDRESS.split(':')
     port = int(port)
-    reader, writer = await asyncio.open_connection(host, port)
-    im_buf = np.ndarray((MAX_IMG_SZ), dtype=np.uint8, buffer=shma.buf)
-    loop = asyncio.get_event_loop()
-
+    reader, writer = await open_connection(host, port)
+    im_buf = np_ndarray((MAX_IMG_SZ), dtype=np_uint8, buffer=shma.buf)
+    
     # TODO: wait till server is ready
 
-    t0 = loop.time()
     logger.info('overlay async client: process started')
     while True:
         call, data = command_queue.get()
         if call == 'exit':
             break
         elif call == 'send_img':
-            assert type(data[0]) == np.ndarray
-            assert type(data[1]) == tuple
+            assert isinstance(data[0], np_ndarray)
+            assert isinstance(data[1], tuple)
             tmp = data[0].flatten()
-            np.copyto(im_buf[:tmp.shape[0]], tmp)
-            await send_img(reader, writer, data[0], f"")
-        await asyncio.sleep(0.005)
+            np_copyto(im_buf[:tmp.shape[0]], tmp)
+            await send_img(reader, writer, data[0], "")
+        await sleep(0.005)
     await send_stop(reader, writer)
+    await sleep(1)
     logger.info('overlay async client: closing the connection')
     writer.close()
     await writer.wait_closed()
@@ -85,7 +88,7 @@ async def overlay_client_async(command_queue: queue.Queue):
 def overlay_client():
     command_queue = queue.Queue()
     try:
-        th = threading.Thread(target=asyncio.run, args=(overlay_client_async(command_queue),))
+        th = threading.Thread(target=run, args=(overlay_client_async(command_queue),))
         th.start()
         def send_img(img):
             command_queue.put(['send_img', [img, img.shape]])
