@@ -1,21 +1,84 @@
+import sys
+import pytest
+# import pytest_asyncio
+import logging
+# import asyncio
+import time
+import cv2 as cv
+import ahk
+import cv2
 
 import ahk as autohotkey
 import d3dshot_stub as d3dshot
 from win_tools import get_window_rect
-from common import *
+from common import (
+    Rect, point2d, millis_now, timeout,
+    hotkey_handler, exit_hotkey,
+    crop_image, get_midpoint, hstack, resize
+    )
 from overlay_client import overlay_client
 from snail import Snail
-from wow_client_utils import *
+from wow_client_utils import (
+    remove_small_connected_components,
+    run_grabcut,
+    calculate_average_color,
+    is_bobber_drown,
+
+    )
+from scipy.cluster.hierarchy import linkage, fcluster
+import numpy as np
 
 
 WOW_WINDOW_NAME = 'World of Warcraft'
+
+
+def logg():
+    logging.info('qwe')
+    sys.stdout.flush()
+
+def test_win_get_rect():
+    x = autohotkey.AHK(version='v2')
+    try:
+        r = get_window_rect(x, WOW_WINDOW_NAME)
+    except Exception:
+        pytest.fail()
+    logging.info(r)
+
+def test_ahk_hotkey():
+    print('qwe')
+    x = ahk.AHK(version='v2')
+    x.start_hotkeys()
+    x.add_hotkey('^q', logg)
+    time.sleep(10)
+
+    x.stop_hotkeys()
+
+def test_ahk_exit_hotkey():
+    x = ahk.AHK(version='v2')
+    x.start_hotkeys()
+    t = time.time()
+    with exit_hotkey(key='^q', ahk=x, handler=logg) as ext:
+        while time.time() - t < 10:
+            if ext() == 'exit':
+                logging.info('event ^q')
+                sys.stdout.flush()
+            time.sleep(0.001)
+    x.stop_hotkeys()
+
+def test_rect_from_midpoint():
+    p = point2d.fromxy(10,10)
+    dist = 7
+    r = Rect.from_midpoint(p, dist)
+    if not np.array_equal(np.array(r.xy()), np.array(p.xy - dist)):
+        pytest.fail('top left corner of Rect is incorrect')
+    if not np.array_equal(np.array(r.wh()), np.array([dist * 2, dist  * 2])):
+        pytest.fail('bottom right corner of Rect is incorrect')
 
 
 def test_mapparser_getrate_capture():
     window_name = WOW_WINDOW_NAME
     ahk = autohotkey.AHK()
     window = ahk.find_window(title=window_name)
-    window_id = int(window.id, 16)
     window.activate()
     r = get_window_rect(ahk, window_name)
     d3d = d3dshot.D3DShot(capture_output=d3dshot.CaptureOutputs.NUMPY, fps=60, roi=r)
@@ -32,14 +95,6 @@ def test_mapparser_getrate_capture():
     logging.info(f'fps: {1000 * (n / dt)}')
     d3d.stop()
 
-
-import cv2
-import numpy as np
-from matplotlib import pyplot as plt
-
-
-from scipy.cluster.hierarchy import linkage, fcluster
-import numpy as np
 
 def partition_objects(objects, metric, threshold):
     """
@@ -81,7 +136,6 @@ def partition_objects(objects, metric, threshold):
 
 
 def filter_lines_by_angle(lines, angle_threshold):
-    angles = []
     filtered_lines = []
     measured_lines = []
 
@@ -99,7 +153,7 @@ def filter_lines_by_angle(lines, angle_threshold):
         return abs(x[1] - y[1])
     vec = partition_objects(measured_lines, metric, angle_threshold)
     # print(vec)
-    largest_group = max(vec, key=len)
+    # largest_group = max(vec, key=len)
     s = sorted(vec, key=len)
     # print(largest_group)
     print(s[-1])
@@ -127,11 +181,11 @@ def highlight_segments(image, min_length, angle_threshold):
 
     if lines is not None:
 
-        for l in lines:
-            x1, y1, x2, y2 = l[0]
+        for line in lines:
+            x1, y1, x2, y2 = line[0]
             cv2.line(image, (x1, y1), (x2, y2), (0,255,0), 5)
         # Filter lines based on angle
-        filtered_lines = filter_lines_by_angle(lines, angle_threshold)
+        # filtered_lines = filter_lines_by_angle(lines, angle_threshold)
         
         # Highlight the filtered line segments on the original image
         # for line in filtered_lines:
@@ -158,25 +212,21 @@ def monitor_bobber(im, fishing_line_color, deviation=np.array((10,10,10))):
         return fr, True, xy, fl
     return im, False, None, fl
 
-async def test_fishing():
-    async with overlay_client() as ovl_show_img, Snail() as s, hotkey_handler('^q', 'exit') as cmd_exit, \
-         hotkey_handler('^1', 'calibrate') as cmd_calib, \
-         hotkey_handler('^2', 'fish') as start_fishing, \
-         timeout(3000) as is_not_timeout:
-        pass
-
 def test_get_tooltip1():
     i = 0
     with overlay_client() as ovl_show_img, \
          Snail() as s, \
          hotkey_handler('^q', 'exit') as cmd_exit, \
          hotkey_handler('^1', 'calibrate') as cmd_calib, \
+         hotkey_handler('^3', 'find_pole') as cmd_find, \
          hotkey_handler('^2', 'fish') as start_fishing, \
          timeout(3000) as is_not_timeout:
         # qweqwe
 
+        # s.ahk.start_hotkeys()
         fishing_line_color = np.array((140, 100, 48))
         bobber_seg_errors = 0
+        wow_fishing_hotkey = 'c'
         # fishing_line_color1 = np.array((126,  88,  48))
         state = 'idle'
         ii = 0
@@ -186,6 +236,16 @@ def test_get_tooltip1():
             if cmd_exit() == 'exit':
                 logging.info('exiting')
                 break
+            if cmd_find() == 'find_pole':
+                s.ahk.send(wow_fishing_hotkey)
+                time.sleep(2)
+                im = s.wait_next_frame().copy()
+                midpoint = get_midpoint(im)
+                dist = 100
+                char_rect = Rect.from_midpoint(midpoint, dist)
+                char_img = crop_image(im, char_rect)
+                cv.imwrite('tmp/char_rect.png', char_img)
+                pass
             if cmd_calib() == 'calibrate':
                 logging.info('calibrating')
                 # s.ahk.send('^{F1}')
@@ -226,7 +286,6 @@ def test_get_tooltip1():
             
             if state == 'fishing':
                 s.ahk.send('c')
-                ll = 0
                 time.sleep(3)
                 logging.info(f'state is {state}')
                 # state = 'monitor-bobber'
@@ -259,7 +318,7 @@ def test_get_tooltip1():
                     cv.rectangle(bobber_msk, bobber_wh // 4, 3 * bobber_wh // 4, (255), -1)
                     try:
                         bobber_segmented, qwe = run_grabcut(bobber_img, bobber_msk)
-                    except Exception as e:
+                    except Exception:
                         bobber_seg_errors += 1
                     if bobber_seg_errors > 4:
                         state = 'fishing'
@@ -287,13 +346,13 @@ def test_get_tooltip1():
             ovl_show_img(out_img)
             i += 1
             time.sleep(0.010)
+        # s.ahk.stop_hotkeys()
 
 
 def test_overlay_111():
     with overlay_client() as ovl_clt:
-        # im = cv.imread('tmp/pole.png')
-        # ovl_clt(im)
-        time.sleep(10)
+        ovl_clt(np.array([[np.array((0,0,0), dtype=np.uint8)]]))
+        time.sleep(5)
 
 
 def test_get_scr():
@@ -301,9 +360,9 @@ def test_get_scr():
          Snail() as s, \
          hotkey_handler('^q', 'exit') as cmd_exit, \
          hotkey_handler('^1', 'calibrate') as cmd_calib, \
-         hotkey_handler('^2', 'fish') as start_fishing, \
          timeout(3000) as is_not_timeout:
         while is_not_timeout():
+            im = s.wait_next_frame()
 
             if cmd_exit() == 'exit':
                 logging.info('exiting')
@@ -313,5 +372,7 @@ def test_get_scr():
                 im = s.wait_next_frame()
                 cv.imwrite('out.png', im)
 
+            im = resize(im, 0.5)
+            ovl_show_img(im)
             time.sleep(0.015)
 
