@@ -10,6 +10,12 @@ import itertools
 import queue
 import ahk as autohotkey
 import logging
+import asyncio
+# import logging
+from typing import Callable, Any
+import sys
+from PIL import Image as PILImage
+from IPython.display import display
 
 class DataObject:
     def __init__(self, data_dict):
@@ -36,10 +42,15 @@ def get_palette(size: int):
         print(c*f)
     return [hsv2rgb((c*f, 0.99, 0.99)) for c in range(size)]
 
+''' Creates a set of non-zero 2-ary polynome components for a number n
+for example 13 = 0b1101 it returns {1, 4, 8} because 3 bits are non-zero
+first, third and fourth
+'''
 def bits(n: int):
-    l = [n >> i & 1 for i in range(n.bit_length())]
-    ll = list(enumerate(l))
-    lll = set(map(lambda x: x[1] << x[0], ll))
+    non_zero_bits = [n >> i & 1 for i in range(0, n.bit_length())]
+    non_zero_bits_enumerated = list(enumerate(non_zero_bits))
+    lll = set(map(lambda x: x[1] << x[0], non_zero_bits_enumerated))
+    lll.discard(0)
     return lll
 
 class UiLocation(Enum):
@@ -74,49 +85,49 @@ class Rect:
     def right(self) -> int:
         return self.x0 + self.w
     
-    def top_left(self):
+    def top_left(self) -> tuple:
         return (self.x0, self.y0)
 
-    def top_right(self):
+    def top_right(self) -> tuple:
         return (self.x0 + self.w, self.y0)
     
-    def bottom_left(self):
+    def bottom_left(self) -> tuple:
         return (self.x0, self.y0 + self.h)
 
-    def bottom_right(self):
+    def bottom_right(self) -> tuple:
         return (self.x0 + self.w, self.y0 + self.h)
     
-    def left_segment(self):
+    def left_segment(self) -> 'Segment':
         return Segment(self.y0, self.y0 + self.h)
 
-    def top_segment(self):
+    def top_segment(self) -> 'Segment':
         return Segment(self.x0, self.x0 + self.w)
     
-    def xywh(self):
+    def xywh(self) -> tuple:
         return (self.x0, self.y0, self.w, self.h)
     
-    def xyxy(self):
+    def xyxy(self) -> tuple:
         return (self.x0, self.y0, self.x0 + self.w, self.y0 + self.h)
     
-    def width(self):
+    def width(self) -> int:
         return self.w
     
-    def height(self):
+    def height(self) -> int:
         return self.h
     
-    def wh(self):
+    def wh(self) -> tuple:
         return (self.w, self.h)
     
-    def xy(self):
+    def xy(self) -> tuple:
         return (self.x0, self.y0)
     
-    def sub_rect(self, sub: 'Rect'):
+    def sub_rect(self, sub: 'Rect') -> 'Rect':
         return Rect(self.x0 + sub.x0, self.y0 + sub.y0, *sub.wh())
     
-    def moved(self, dx: int, dy: int):
+    def moved(self, dx: int, dy: int) -> 'Rect':
         return Rect(self.x0 + dx, self.y0 + dy, *self.wh())
     
-    def __add__(self, other: np.array):
+    def __add__(self, other: np.array) -> 'Rect':
         return Rect(self.x0 + other[0], self.y0 + other[1], self.w, self.h)
     
     @classmethod
@@ -140,6 +151,11 @@ class Rect:
     @classmethod
     def from_top_right(cls, x: int, y: int, w: int, h: int) -> 'Rect':
         return Rect(x - w, y, w, h)
+    
+    @classmethod
+    def from_midpoint(cls, midpt:'point2d', r:int) -> 'Rect':
+        return Rect.from_xyxy(*(midpt.xy - r), *(midpt.xy + r))
+        return None
     
 @dataclass
 class Segment:
@@ -334,18 +350,28 @@ def hstack(imgs):
 
 
 @contextlib.contextmanager
-def exit_hotkey(key = '^q', ahk = None):
+def exit_hotkey(key = '^q', ahk:autohotkey.AHK = None, handler: Callable[[], Any] = None):
+    handler_name = 'exit'
     q = queue.Queue()
-    if ahk is None:
-        ahk = autohotkey.AHK()
-    ahk.add_hotkey(key, lambda: q.put('exit'), logging.info('exit hotkey handler'))
-    ahk.start_hotkeys()
+    # if ahk is None:
+    #     ahk = autohotkey.AHK()
+    # lambda: q.put('exit'), logging.info('exit hotkey handler')
+    # ahk.start_hotkeys()
+    def _handler_stub():
+        if handler is not None:
+            handler()
+        q.put(handler_name)
     def get_command():
         if not q.empty():
             return q.get()
         return None
+    ahk.add_hotkey(key, _handler_stub)
+    logging.info(f'start ${handler_name} handler')
+    sys.stdout.flush()
     yield get_command
-    ahk.stop_hotkeys() 
+    logging.info(f'end ${handler_name} handler')
+    sys.stdout.flush()
+    ahk.remove_hotkey(key)
 
 @contextlib.contextmanager
 def hotkey_handler(key, cmd):
@@ -353,7 +379,7 @@ def hotkey_handler(key, cmd):
     ahk = autohotkey.AHK()
     logging.info(f'adding new hotkey {key} {cmd}')
     ahk.add_hotkey(key, lambda: q.put(cmd), logging.info(f"{cmd} command triggered"))
-    ahk.start_hotkeys()
+    # ahk.start_hotkeys()
     def get_command():
         if not q.empty():
             cmd = q.get()
@@ -361,7 +387,7 @@ def hotkey_handler(key, cmd):
             return cmd
         return None
     yield get_command
-    ahk.stop_hotkeys()
+    # ahk.stop_hotkeys()
 
 @dataclass
 class point2d:
@@ -394,6 +420,59 @@ def timeout(tsec: float):
     def is_not_timeout():
         return time.time() - t0 < tsec
     yield is_not_timeout
+
+
+@contextlib.asynccontextmanager
+async def timeout_context_manager(timeout):
+    exit_event = asyncio.Event()
+
+    def premature_exit():
+        """Function to trigger a premature exit."""
+        logging.info("Premature exit triggered.")
+        exit_event.set()
+
+    print(f"Entering context, will wait for {timeout} seconds unless exited prematurely.")
+    try:
+        # Yield the function that can trigger a premature exit
+        yield premature_exit
+
+        logging.info(f"Waiting for {timeout} seconds or until a premature exit is triggered.")
+        try:
+            await asyncio.wait_for(exit_event.wait(), timeout=timeout)
+        except asyncio.TimeoutError:
+            logging.info("Exiting context after timeout.")
+        else:
+            logging.info("Exiting context due to premature exit.")
+    finally:
+        # Reset event or handle any necessary cleanup here
+        exit_event.clear()    
+
+
+@contextlib.asynccontextmanager
+async def timeout_context_manager1(timeout):
+    exit_event = asyncio.Event()
+
+    async def premature_exit():
+        logging.info("Premature exit triggered.")
+        exit_event.set()
+
+    try:
+        logging.info(f"Entering context, will wait for {timeout} seconds unless exited prematurely.")
+        yield premature_exit  # Yield the method to trigger early exit
+
+    finally:
+        if not exit_event.is_set():
+            try:
+                logging.info("Waiting for the context block to complete or for a timeout.")
+                await asyncio.wait_for(exit_event.wait(), timeout=timeout)
+            except asyncio.TimeoutError:
+                logging.info("Timeout reached: exiting context forcefully.")
+            else:
+                logging.info("Exiting context after successful completion.")
+        exit_event.clear()
+
+
+
 def mixin(dst: np.ndarray, src: np.ndarray, alpha: float) -> np.ndarray:
     assert 0 < alpha <= 1.0
     dst = cv.addWeighted(dst, alpha, src, 1.0 - alpha, 0, dst)
@@ -442,10 +521,12 @@ def get_closest(mvl, v):
     closest = min(dist, key=lambda x: x[1])
     return closest[0]
 
-from PIL import Image as PILImage
-from IPython.display import display
+'''Display image or list of images in Jupiter notebook
+'''
+def dis(*imgs: np.ndarray) -> None:
+    pil_image_list = list(map(PILImage.fromarray, imgs))
+    display(*pil_image_list)
 
-def dis(*imgs):
 
-    l = list(map(PILImage.fromarray, imgs))
-    display(*l)
+def resize(im: np.ndarray, f: float) -> np.ndarray:
+    return cv.resize(im, None, fx = f, fy = f)
