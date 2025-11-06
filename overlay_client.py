@@ -32,7 +32,7 @@ class Commands(enum.Enum):
     OK = 0xCAFFEECA
 
 async def send_img(reader: StreamReader, writer: StreamWriter, im: np_ndarray, nme: str):
-    logger.info(f'command: 0x{Commands.SAVE.value:X}, {im.shape}, size: {im.size}')
+    # logger.info(f'command: 0x{Commands.SAVE.value:X}, {im.shape}, size: {im.size}')
     fmt = 'Iiii'
     assert len(im.shape) == 3
     data = struct.pack(fmt, Commands.SAVE.value, *im.shape)
@@ -55,7 +55,7 @@ async def send_stop(reader: StreamReader, writer: StreamWriter):
 
 
 async def overlay_client_async(command_queue: queue.Queue):
-    proc = await create_subprocess_exec('python.exe', f'{SERVER_MODULE_NAME}.py')
+    proc = await create_subprocess_exec('uv', 'run', 'python', f'{SERVER_MODULE_NAME}.py')
     shma = shm.SharedMemory(name=SHMEM_NAME, create=True, size=MAX_IMG_SZ)
     host, port = SERVER_ADDRESS.split(':')
     port = int(port)

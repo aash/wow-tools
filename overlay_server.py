@@ -1,15 +1,23 @@
+import sys
+import json
+import logging
+import time
 import asyncio
-import enum
-from enum import Enum
 import struct
 import numpy as np
 import cv2 as cv
+from enum import Enum
+from dataclasses import dataclass
+from collections import defaultdict
+
 from asyncio.streams import StreamWriter, StreamReader
 from asyncio.exceptions import IncompleteReadError
-import multiprocessing as mp
 import multiprocessing.shared_memory as shm
-import sys
-import logging
+
+from qasync import QEventLoop, QApplication, asyncClose
+from PySide6.QtGui import QPainter, QColor, QImage
+from PySide6.QtWidgets import QMainWindow, QWidget, QGridLayout, QLabel
+from PySide6.QtCore import QRect, Qt, Signal
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO
@@ -68,27 +76,12 @@ class ClientHandler:
                     await writer.drain()
                 else:
                     logger.info(f'Received unknown command: {t[0]}')
-            except IncompleteReadError as e:
+            except IncompleteReadError:
                 asyncio.sleep(0.03)
 
         logger.info('Closing the connection')
         writer.close()
 
-
-import sys
-from dataclasses import dataclass
-
-from PySide6.QtGui import QCloseEvent, QPainter, QColor, QPen, QBrush, QImage, QPixmap
-from PySide6.QtWidgets import QApplication, QMainWindow, QWidget, QGridLayout, QGraphicsLayout, QBoxLayout, QSizePolicy, QLabel
-from PySide6.QtCore import QRect, Qt, QThread, QEvent, Signal
-from PySide6.QtWidgets import QLabel
-from PySide6.QtCore import Qt, QSize
-from PySide6.QtGui import QBrush, QPen, QFontMetrics, QPainterPath, QPainter
-
-import numpy as np
-from collections import defaultdict
-import logging
-import math, time
 
 def millis_now():
     return int(time.time()*1000)
@@ -99,7 +92,6 @@ class Marker:
     geometry: tuple
     color: QColor
     data: dict
-import json
 
 
 def json_to_marker(json_string):
@@ -115,14 +107,10 @@ def json_to_marker(json_string):
         data=data['data']
     )
 
-from PySide6.QtWidgets import QMainWindow, QPlainTextEdit
-from PySide6.QtCore import Qt
-from qasync import QEventLoop, QApplication
-# from asyncqt import QEventLoop
 class MainWindow(QMainWindow):
     update_signal = Signal()
     new_marker_signal = Signal()
-    new_image_signal = Signal(QImage)
+    # new_image_signal = Signal(QImage)
 
     def __init__(self, stop_event: asyncio.Event):
         super().__init__()
@@ -138,9 +126,9 @@ class MainWindow(QMainWindow):
         self.w = QWidget(self)
         #self.w.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.w.setFixedSize(1920*2, 1080*2)
-        l = QGridLayout()
-        l.setContentsMargins(0, 0, 0, 0)
-        self.w.setLayout(l)
+        layout = QGridLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
+        self.w.setLayout(layout)
         self.setCentralWidget(self.w)
 
         self.w.setStyleSheet("border: 2px dashed green")
@@ -176,9 +164,10 @@ class MainWindow(QMainWindow):
         self.img = None
 
     @classmethod
-    async def create(cls, loop, stop_event):
+    def create(cls, loop: QEventLoop, stop_event: asyncio.Event):
         cc = cls(stop_event)
-        loop.create_task(cc.update_timer(), name='timer')
+        tsk = loop.create_task(cc.update_timer(), name='timer')
+        tsk.set_name('update timer task')
         return cc
 
     def paintEvent(self, event):
@@ -186,6 +175,13 @@ class MainWindow(QMainWindow):
         if self.img is not None:
             painter.drawImage(0, 0, self.img)
         event.accept()
+
+
+    @asyncClose
+    async def closeEvent(self, event):
+        logger.info('close event')
+        self.sev.set()
+        return super().closeEvent(event)
         
     async def update_timer(self):
         while not self.sev.is_set():
@@ -196,31 +192,40 @@ class MainWindow(QMainWindow):
             self.update_signal.emit()
             await asyncio.sleep(0.01)
 
-async def main():
+# async def main():
+if __name__ == '__main__':
     
     overlay_server_address = '127.0.0.1:5123'
     app = QApplication(sys.argv)
     loop = QEventLoop(app)
+    loop.set_debug(True)
     asyncio.set_event_loop(loop)
 
     stop_event = asyncio.Event()
     app.aboutToQuit.connect(stop_event.set)
-    window = await MainWindow.create(loop, stop_event)
+    # window = MainWindow(stop_event)
+
+    window = MainWindow.create(loop, stop_event)
+    # timer_update_task = loop.create_task(window.update_timer(), name='timer')
     window.setWindowTitle('aions')
     window.show()
     logger.info('overlay window created')
+    
+
+    # asyncio.run(app_close_event.wait(), loop_factory=QEventLoop)
 
     try:
         host, port = overlay_server_address.split(':')
         port = int(port)
-        server = await loop.create_server(lambda: asyncio.StreamReaderProtocol(asyncio.StreamReader(),
-            ClientHandler(stop_event, window), loop=loop), host, port)
-        with loop:
-            loop.run_until_complete(stop_event.wait())
-            server.close()
-            await server.wait_closed()
+        asyncio.run_coroutine_threadsafe(
+        loop.create_server(lambda: asyncio.StreamReaderProtocol(asyncio.StreamReader(),
+            ClientHandler(stop_event, window), loop=loop), host, port), loop)
+        loop.run_until_complete(stop_event.wait())
+            # timer_update_task.cancel()
     finally:
+        # TODO fix deinitialization, event loop needs revisiting
+        # server.close()
+        # await server.wait_closed()
         pass
 
-if __name__ == '__main__':
-    asyncio.run(main())
+    # asyncio.run(main())
