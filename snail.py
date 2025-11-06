@@ -14,10 +14,10 @@ class Snail:
 
     def __init__(self):
         window_name = self.WOW_WINDOW_NAME
-        self.ahk = autohotkey.AHK()
+        self.ahk = autohotkey.AHK(version='v2')
         self.ahk.set_coord_mode('Mouse', 'Client')
         self.window = self.ahk.find_window(title=window_name)
-        self.window_id = int(self.window.id, 16)
+        self.window_id = int(self.window.id)
         self.window.activate()
         self.window_rect = get_window_rect(self.ahk, window_name)
         self.d3d_fps = 30
