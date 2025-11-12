@@ -14,7 +14,7 @@ class CustomFormatter(logging.Formatter):
 def pytest_configure(config):
     if not os.path.exists('logs'):
         os.mkdir('logs')
-    formatter = CustomFormatter('%(levelnameChar)s %(relativeCreatedInSeconds)9.2f %(name)s %(message)s')
+    formatter = CustomFormatter('%(levelnameChar)s %(relativeCreatedInSeconds)6.2f %(name)s %(message)s')
 
 
     file_handler = logging.FileHandler("logs/tests.log", encoding='utf-8')
