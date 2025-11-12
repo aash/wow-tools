@@ -20,7 +20,7 @@ from PySide6.QtWidgets import QMainWindow, QWidget, QGridLayout, QLabel
 from PySide6.QtCore import QRect, Qt, Signal
 
 logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.WARN
 )
 logger = logging.getLogger('overlay_server')
 
