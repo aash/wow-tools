@@ -530,3 +530,12 @@ def dis(*imgs: np.ndarray) -> None:
 
 def resize(im: np.ndarray, f: float) -> np.ndarray:
     return cv.resize(im, None, fx = f, fy = f)
+
+
+SERVER_IP = '127.0.0.1'
+SERVER_PORT = 12345
+SHMEM_NAME = 'shmem_mask_analyzer'
+SHMEM_DATA_SIZE = 1024 * 1024 * 256
+
+OPCODE_RUN_SAM = 0xAB
+
