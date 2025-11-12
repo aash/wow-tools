@@ -16,7 +16,8 @@ import contextlib
 import enum
 
 SERVER_MODULE_NAME = 'overlay_server'
-MAX_IMG_SZ = 1024 * 1024 * 10
+# MAX_IMG_SZ = 1024 * 1024 * 10
+MAX_IMG_SZ = 2048 * 1024 * 8
 SERVER_ADDRESS = '127.0.0.1:5123'
 SHMEM_NAME = 'overlay_image_buffer'
 
