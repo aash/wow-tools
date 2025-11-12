@@ -12,7 +12,7 @@ import ahk as autohotkey
 import logging
 import asyncio
 # import logging
-from typing import Callable, Any
+from typing import Callable, Any, Union
 import sys
 from PIL import Image as PILImage
 from IPython.display import display
@@ -363,8 +363,11 @@ def exit_hotkey(key = '^q', ahk:autohotkey.AHK = None, handler: Callable[[], Any
         q.put(handler_name)
     def get_command():
         if not q.empty():
-            return q.get()
-        return None
+            trigger_cmd = q.get()
+            if trigger_cmd == handler_name:
+                logging.info(f'triggered ${handler_name} handler')
+                return True
+        return False
     ahk.add_hotkey(key, _handler_stub)
     logging.info(f'start ${handler_name} handler')
     sys.stdout.flush()
@@ -374,32 +377,159 @@ def exit_hotkey(key = '^q', ahk:autohotkey.AHK = None, handler: Callable[[], Any
     ahk.remove_hotkey(key)
 
 @contextlib.contextmanager
-def hotkey_handler(key, cmd):
+def hotkey_handler(key: str, cmd: str, ahk:autohotkey.AHK = None, handler: Callable[[], Any] = None):
+    handler_name = cmd
     q = queue.Queue()
-    ahk = autohotkey.AHK()
-    logging.info(f'adding new hotkey {key} {cmd}')
-    ahk.add_hotkey(key, lambda: q.put(cmd), logging.info(f"{cmd} command triggered"))
-    # ahk.start_hotkeys()
+    def _handler_stub():
+        if handler is not None:
+            handler()
+        q.put(handler_name)
     def get_command():
         if not q.empty():
-            cmd = q.get()
-            logging.info(f'hotkey triggered {cmd}')
-            return cmd
-        return None
+            trigger_cmd = q.get()
+            if trigger_cmd == cmd:
+                logging.info(f'triggered ${handler_name} handler')
+                return True
+        return False
+    ahk.add_hotkey(key, _handler_stub)
+    logging.info(f'start ${handler_name} handler')
+    sys.stdout.flush()
     yield get_command
-    # ahk.stop_hotkeys()
+    logging.info(f'end ${handler_name} handler')
+    sys.stdout.flush()
+    ahk.remove_hotkey(key)
+
 
 @dataclass
 class point2d:
     xy: np.ndarray
-    def __call__(self, inv: bool = False):
-        if inv:
-            return np.array((self.xy[1], self.xy[0]))
-        return self.xy
+    def __init__(self, x: Union[int, float], y: Union[int, float]) -> None:
+        """Initialize a 2D point with given x and y coordinates."""
+        self.xy = np.array([x, y])
+
+    def __repr__(self) -> str:
+        """Return a string representation of the point."""
+        return f"point2d({self.xy[0]}, {self.xy[1]})"
+
+    def __eq__(self, other: object) -> bool:
+        """Check if two points are equal."""
+        if isinstance(other, point2d):
+            return np.array_equal(self.xy, other.xy)
+        return False
+    
+    def __neg__(self) -> 'point2d':
+        return point2d(*(-self.xy))
+    
+    def __pos__(self) -> 'point2d':
+        return point2d(*self.xy)
+
+    def __add__(self, other: Union['point2d', int, float]) -> 'point2d':
+        """Add two points."""
+        if isinstance(other, point2d):
+            return point2d(*(self.xy + other.xy))
+        elif isinstance(other, (int, float)):
+            return point2d(*(self.xy + other))
+        return NotImplemented
+
+    def __sub__(self, other: Union['point2d', int, float]) -> 'point2d':
+        """Subtract one point from another."""
+        if isinstance(other, point2d):
+            return point2d(*(self.xy - other.xy))
+        elif isinstance(other, (int, float)):
+            return point2d(*(self.xy - other))
+        return NotImplemented
+
+    def __mul__(self, scalar: Union[int, float]) -> 'point2d':
+        """Multiply the point by a scalar."""
+        if isinstance(scalar, (int, float)):
+            return point2d(*(self.xy * scalar))
+        return NotImplemented
+
+    def __truediv__(self, scalar: Union[int, float]) -> 'point2d':
+        """Divide the point by a scalar."""
+        if isinstance(scalar, (int, float)):
+            return point2d(*(self.xy / scalar))
+        return NotImplemented
+
+    def __mod__(self, scalar: int) -> 'point2d':
+        """Divide the point by a scalar."""
+        if isinstance(scalar, int):
+            return point2d(*(self.xy % scalar))
+        return NotImplemented
+
+    def __imod__(self, scalar: int) -> 'point2d':
+        """Divide the point by a scalar."""
+        if isinstance(scalar, int):
+            self.xy %= scalar
+            return self
+        return NotImplemented
+
+    def __floordiv__(self, scalar: Union[int, float]) -> 'point2d':
+        """Floor divide the point by a scalar."""
+        if isinstance(scalar, (int, float)):
+            return point2d(*(self.xy // scalar))
+        return NotImplemented
+
+    def __iadd__(self, other: Union['point2d', int, float]) -> 'point2d':
+        """In-place addition of two points."""
+        if isinstance(other, point2d):
+            self.xy += other.xy
+            return self
+        elif np.issubdtype(self.xy.dtype, np.integer) and isinstance(other, int):
+            self.xy += other
+            return self
+        elif np.issubdtype(self.xy.dtype, np.floating) and isinstance(other, (int, float)):
+            self.xy += other
+            return self
+        return NotImplemented
+
+    def __isub__(self, other: Union['point2d', int, float]) -> 'point2d':
+        """In-place subtraction of a point."""
+        if isinstance(other, point2d):
+            self.xy -= other.xy
+            return self
+        elif np.issubdtype(self.xy.dtype, np.integer) and isinstance(other, int):
+            self.xy -= other
+            return self
+        elif np.issubdtype(self.xy.dtype, np.floating) and isinstance(other, (int, float)):
+            self.xy -= other
+            return self
+        return NotImplemented
+
+    # TODO: finish implementation of in-place operations
+    def __imul__(self, scalar: Union[int, float]) -> 'point2d':
+        """In-place multiplication of the point by a scalar."""
+        if isinstance(scalar, (int, float)):
+            self.xy *= scalar
+            return self
+        return NotImplemented
+
+    def __itruediv__(self, scalar: Union[int, float]) -> 'point2d':
+        """In-place division of the point by a scalar."""
+        if isinstance(scalar, (int, float)):
+            self.xy /= scalar
+            return self
+        return NotImplemented
+
+    def __ifloordiv__(self, scalar: Union[int, float]) -> 'point2d':
+        """In-place floor division of the point by a scalar."""
+        if isinstance(scalar, (int, float)):
+            self.xy //= scalar
+            return self
+        return NotImplemented
+    
+    def swapped(self):
+        """Return underlying ndarray with optionally swapping coordinates"""
+        return point2d(self.xy[1], self.xy[0])
+    
+    def int(self):
+        return point2d(int(self.xy[0]), int(self.xy[1]))
+    
     @classmethod
     def fromndarray(cls, arr: np.ndarray):
         assert arr.shape == (2, )
         return cls(arr) 
+    
     @classmethod
     def fromxy(cls, x: int, y: int):
         return cls(np.array((x, y)))
@@ -473,12 +603,44 @@ async def timeout_context_manager1(timeout):
 
 
 
-def mixin(dst: np.ndarray, src: np.ndarray, alpha: float) -> np.ndarray:
+def alpha_blend(dst: np.ndarray, src: np.ndarray, alpha: float) -> np.ndarray:
+    """ Alpha blend two images with alpha coefficient
+    """
     assert 0 < alpha <= 1.0
-    dst = cv.addWeighted(dst, alpha, src, 1.0 - alpha, 0, dst)
+    dst = cv.addWeighted(dst, alpha, src, 1.0 - alpha, 0)
     return dst
 
+def draw_highlight(img, mask, ratio = 0.8, cl = (255, 0, 0), border: int = 1):
+    """Draws a highlight on an image using a given mask.
+
+    This function applies a highlight to the specified image by utilizing a mask. 
+    The highlight is blended with the image at a certain ratio and appears in the 
+    specified color.
+
+    Args:
+        img: The image on which the highlight is to be drawn. It should be a NumPy array or similar image representation.
+        mask: The mask that determines the region of the image to be highlighted. It should be of the same size as `img`.
+        ratio: A float value between 0 and 1 indicating the blending ratio of the highlight. Defaults to 0.8.
+        cl: A tuple representing the color of the highlight in RGB format. Defaults to (255, 0, 0) for red.
+
+    Returns:
+        The image with the highlight applied. The return value will be of the same type as `img`, with the highlight modification.
+    """
+    assert len(img.shape) == 3 and len(mask.shape) == 2, 'img should be RGB image, mask should be binary image'
+    assert img.shape[0] == mask.shape[0] and img.shape[1] == mask.shape[1], 'image and the mask should be same size'
+    gr = cv.cvtColor(mask, cv.COLOR_RGB2GRAY)
+    contours, _ = cv.findContours(gr, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
+    mix = alpha_blend(img, mask, ratio)
+    mix = mix & mask
+    notmask = np.bitwise_not(mask)
+    cutout = img & notmask
+    final = mix | cutout
+    cv.drawContours(final, contours, -1, cl, border)
+    return final
+
 def get_midpoint(im: np.ndarray) -> point2d:
+    """ Get center point of an image
+    """
     return point2d.fromxy(im.shape[1] // 2, im.shape[0] // 2)
 
 def strip_zeros_2d(image):
