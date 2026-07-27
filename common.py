@@ -12,10 +12,13 @@ import ahk as autohotkey
 import logging
 import asyncio
 # import logging
-from typing import Callable, Any, Union
+from typing import Callable, Any, Union, LiteralString, Literal, Dict, List
 import sys
 from PIL import Image as PILImage
 from IPython.display import display
+import networkx as nx
+from skimage.morphology import skeletonize, thin
+from skimage.graph import pixel_graph
 
 class DataObject:
     def __init__(self, data_dict):
@@ -690,8 +693,8 @@ def dis(*imgs: np.ndarray) -> None:
     display(*pil_image_list)
 
 
-def resize(im: np.ndarray, f: float) -> np.ndarray:
-    return cv.resize(im, None, fx = f, fy = f)
+def resize(im: np.ndarray, f: float, intp=cv.INTER_LINEAR) -> np.ndarray:
+    return cv.resize(im, None, fx = f, fy = f, interpolation=intp)
 
 
 SERVER_IP = '127.0.0.1'
@@ -701,3 +704,313 @@ SHMEM_DATA_SIZE = 1024 * 1024 * 256
 
 OPCODE_RUN_SAM = 0xAB
 
+SkeletonizeAlgorithms = Literal['skeletonize','thin']
+SKELETONIZE_ALGORITHMS_MAP: Dict[SkeletonizeAlgorithms, Callable[[np.ndarray], np.ndarray]] = {
+    'skeletonize': skeletonize,
+    'thin': thin
+}
+
+
+@dataclass(init=False)
+class ConnectedComponentMetrics:
+    norm: int
+    image: np.ndarray
+    area: float
+    length: float
+
+@dataclass(init=False)
+class SkeletonMetrics:
+    norm: int
+    image: np.ndarray
+    area: float
+    length: float
+    edge_points: List[point2d]
+
+
+@dataclass(init=False)
+class mask_metrics:
+    connected_components: List[ConnectedComponentMetrics]
+    skeletons: List[ConnectedComponentMetrics]
+
+@contextlib.contextmanager
+def resize_optimization(mask: np.ndarray, factor: float = 2):
+    resized_mask = resize(mask, f=1/factor, intp=cv.INTER_NEAREST)
+    def restore(values_list):
+        for v in values_list:
+            v *= factor
+        pass
+    yield resized_mask, restore
+
+def get_mask_metrics(mask: np.ndarray, sk_algo: SkeletonizeAlgorithms = 'skeletonize') -> Union[dict, None]:
+    """ Get a number of metrics on binary mask: number of connected components,
+        edge points of the skeleton, contour area, contour length
+    """
+
+    assert len(mask.shape) == 2
+    metrics = mask_metrics()
+
+    _, binary_mask = cv.threshold(mask, 1, 255, cv.THRESH_BINARY)
+
+    num_labels, labels, stats, centroids = cv.connectedComponentsWithStats(binary_mask, connectivity=8)
+    metrics.connected_components_norm = [stats[i, cv.CC_STAT_AREA] for i in range(1, num_labels)]
+    metrics.connected_components_size = num_labels - 1
+        
+
+    
+    skeleton_mask = SKELETONIZE_ALGORITHMS_MAP[sk_algo](binary_mask)
+    csrm_skel_graph, nodes = pixel_graph(skeleton_mask, connectivity=2)
+    skel_graph = nx.from_scipy_sparse_array(csrm_skel_graph)
+
+
+    for skel_cc in nx.connected_components(skel_graph):
+        skel_metrics = SkeletonMetrics()
+        edge_nodes = [node for node in skel_cc if node.degree() == 1]
+        skel_metrics.edge_points = [point2d(*np.unravel_index(raveled_index, mask.shape))
+                       for raveled_index in [nodes[en] for en in edge_nodes]]
+        # skel_metrics.area = len(skel_cc)
+
+    
+    # bin_mask = mask > 0
+    # csrm_graph, nodes = pixel_graph(bin_mask, connectivity=2)
+    # G1 = nx.from_scipy_sparse_array(csrm_graph)
+    # ccs1 = list(nx.connected_components(G1))
+
+    # if len(ccs1) == 1:
+        # print(f'area: {len(ccs1[0])}')
+    for skel_cc in nx.connected_components(skel_graph):
+        metrics.skeleton_norms = [len(cc) for cc in ccs]
+        edge_nodes = [node for node, degree in skel_graph.degree() if degree == 1]
+        edge_points = [point2d(*np.unravel_index(raveled_index, mask.shape))
+                       for raveled_index in [nodes[en] for en in edge_nodes]]
+        metrics.edge_points = edge_points
+        contours, _ = cv.findContours(mask, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
+        contour = contours[0]
+        contour_length = cv.arcLength(contour, True)
+        area = cv.contourArea(contour)
+        metrics.contour_area = area
+        metrics.contour_length = contour_length
+    return metrics
+
+def is_close_to_edge(pt: point2d, rect: Rect, eps: int = 5):
+    """ Predicate to detect if a point is close to rectangle edge
+    """
+    return np.isclose(pt.xy[0], rect.left(), atol=eps) or np.isclose(pt.xy[0], rect.right(), atol=eps) or \
+        np.isclose(pt.xy[1], rect.top(), atol=eps) or np.isclose(pt.xy[1], rect.bottom(), atol=eps)
+
+
+class FloatWrapper:
+    def __init__(self, value=0.0):
+        self.value = float(value)
+
+    def __str__(self):
+        return str(self.value)
+
+    def __repr__(self):
+        return f'FloatWrapper({self.value})'
+
+    # Arithmetic operations
+    def __add__(self, other):
+        if isinstance(other, FloatWrapper):
+            return FloatWrapper(self.value + other.value)
+        return FloatWrapper(self.value + other)
+
+    def __radd__(self, other):
+        return self.__add__(other)
+
+    def __sub__(self, other):
+        if isinstance(other, FloatWrapper):
+            return FloatWrapper(self.value - other.value)
+        return FloatWrapper(self.value - other)
+
+    def __rsub__(self, other):
+        if isinstance(other, FloatWrapper):
+            return FloatWrapper(other.value - self.value)
+        return FloatWrapper(other - self.value)
+
+    def __mul__(self, other):
+        if isinstance(other, FloatWrapper):
+            return FloatWrapper(self.value * other.value)
+        return FloatWrapper(self.value * other)
+
+    def __rmul__(self, other):
+        return self.__mul__(other)
+
+    def __truediv__(self, other):
+        if isinstance(other, FloatWrapper):
+            return FloatWrapper(self.value / other.value)
+        return FloatWrapper(self.value / other)
+
+    def __rtruediv__(self, other):
+        if isinstance(other, FloatWrapper):
+            return FloatWrapper(other.value / self.value)
+        return FloatWrapper(other / self.value)
+
+    # Comparison operations
+    def __eq__(self, other):
+        if isinstance(other, FloatWrapper):
+            return self.value == other.value
+        return self.value == other
+
+    def __ne__(self, other):
+        return not self.__eq__(other)
+
+    def __lt__(self, other):
+        if isinstance(other, FloatWrapper):
+            return self.value < other.value
+        return self.value < other
+
+    def __le__(self, other):
+        if isinstance(other, FloatWrapper):
+            return self.value <= other.value
+        return self.value <= other
+
+    def __gt__(self, other):
+        if isinstance(other, FloatWrapper):
+            return self.value > other.value
+        return self.value > other
+
+    def __ge__(self, other):
+        if isinstance(other, FloatWrapper):
+            return self.value >= other.value
+        return self.value >= other
+
+    # Conversion method
+    def __float__(self):
+        return self.value
+
+    # In-place operations
+    def __iadd__(self, other):
+        if isinstance(other, FloatWrapper):
+            self.value += other.value
+        else:
+            self.value += other
+        return self
+
+    def __isub__(self, other):
+        if isinstance(other, FloatWrapper):
+            self.value -= other.value
+        else:
+            self.value -= other
+        return self
+
+    def __imul__(self, other):
+        if isinstance(other, FloatWrapper):
+            self.value *= other.value
+        else:
+            self.value *= other
+        return self
+
+    def __itruediv__(self, other):
+        if isinstance(other, FloatWrapper):
+            self.value /= other.value
+        else:
+            self.value /= other
+        return self
+    
+class IntWrapper:
+    def __init__(self, value=0):
+        self.value = value
+
+    def __str__(self):
+        return str(self.value)
+
+    def __repr__(self):
+        return f'IntWrapper({self.value})'
+
+    # Arithmetic operations
+    def __add__(self, other):
+        if isinstance(other, IntWrapper):
+            return IntWrapper(self.value + other.value)
+        return IntWrapper(self.value + other)
+
+    def __radd__(self, other):
+        return self.__add__(other)
+
+    def __sub__(self, other):
+        if isinstance(other, IntWrapper):
+            return IntWrapper(self.value - other.value)
+        return IntWrapper(self.value - other)
+
+    def __rsub__(self, other):
+        if isinstance(other, IntWrapper):
+            return IntWrapper(other.value - self.value)
+        return IntWrapper(other - self.value)
+
+    def __mul__(self, other):
+        if isinstance(other, IntWrapper):
+            return IntWrapper(self.value * other.value)
+        return IntWrapper(self.value * other)
+
+    def __rmul__(self, other):
+        return self.__mul__(other)
+
+    def __truediv__(self, other):
+        if isinstance(other, IntWrapper):
+            return IntWrapper(self.value // other.value)
+        return IntWrapper(self.value // other)
+
+    def __rtruediv__(self, other):
+        if isinstance(other, IntWrapper):
+            return IntWrapper(other.value // self.value)
+        return IntWrapper(other // self.value)
+
+    # Comparison operations
+    def __eq__(self, other):
+        if isinstance(other, IntWrapper):
+            return self.value == other.value
+        return self.value == other
+
+    def __ne__(self, other):
+        return not self.__eq__(other)
+
+    def __lt__(self, other):
+        if isinstance(other, IntWrapper):
+            return self.value < other.value
+        return self.value < other
+
+    def __le__(self, other):
+        if isinstance(other, IntWrapper):
+            return self.value <= other.value
+        return self.value <= other
+
+    def __gt__(self, other):
+        if isinstance(other, IntWrapper):
+            return self.value > other.value
+        return self.value > other
+
+    def __ge__(self, other):
+        if isinstance(other, IntWrapper):
+            return self.value >= other.value
+        return self.value >= other
+
+    # Other methods
+    def __int__(self):
+        return self.value
+
+    def __iadd__(self, other):
+        if isinstance(other, IntWrapper):
+            self.value += other.value
+        else:
+            self.value += other
+        return self
+
+    def __isub__(self, other):
+        if isinstance(other, IntWrapper):
+            self.value -= other.value
+        else:
+            self.value -= other
+        return self
+
+    def __imul__(self, other):
+        if isinstance(other, IntWrapper):
+            self.value *= other.value
+        else:
+            self.value *= other
+        return self
+
+    def __itruediv__(self, other):
+        if isinstance(other, IntWrapper):
+            self.value //= other.value
+        else:
+            self.value //= other
+        return self

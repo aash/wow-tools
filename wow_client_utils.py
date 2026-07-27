@@ -113,11 +113,28 @@ def remove_small_connected_components(image, min_size=100):
     else:
         gray = image
     _, binary = cv2.threshold(gray, 1, 255, cv2.THRESH_BINARY)
-    num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(binary, connectivity=4)
+    num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(binary, connectivity=8)
     output_image = np.zeros_like(image)
     for i in range(1, num_labels):
         area = stats[i, cv2.CC_STAT_AREA]
         if area >= min_size:
             output_image[labels == i] = image[labels == i]
+
+    return output_image
+
+def leave_large_ccs(image, cc_num=1, cc_connectivity=8):
+    """leave cc_num largest connected components"""
+    if len(image.shape) == 3:
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    else:
+        gray = image
+    _, binary = cv2.threshold(gray, 1, 255, cv2.THRESH_BINARY)
+    num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(binary, connectivity=cc_connectivity)
+    output_image = np.zeros_like(image)
+    stat_area = [ (i, stats[i, cv2.CC_STAT_AREA]) for i in range(1, num_labels)]
+    if num_labels < cc_num:
+        raise RuntimeError('not enough connected components in input image')
+    for i, a in sorted(stat_area, key=lambda x: x[1], reverse=True)[:cc_num]:
+        output_image[labels == i] = image[labels == i]
 
     return output_image
